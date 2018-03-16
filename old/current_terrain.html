@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>No shaders</title>
+    <style>
+        body { margin: 0; }
+        canvas { width: 100%; height: 100% }
+    </style>
+</head>
+<body>
+<div id="info"></div>
+<div id="container"></div>
+<script src="src/three.min.js"></script>
+<script src="src/Tree.js"></script>
+<script src="src/TreeGeometry.js"></script>
+<script src="src/TreeHelper.js"></script>
+<script src="src/FlyControls.js"></script>		
+<script src="src/OrbitControls.js"></script>
+<script src="src/perlin.js"></script>
+<script src="src/noise.js"></script>
+<script src="src/stats.min.js"></script>
+
+
+<script>
+	var Lines = [], middle_faces = [], trees_mesh =[], n = 32, m = 32, k = 0, waves = 30;
+	var pixelsX = 50, pixelsY = 50;
+	var perlinCycle          = 0;
+	var perlinCycleIncrement = 0.075;
+	var ribbons = [];
+	var numRibbons = 1;
+	var ribbonYDeviation = 200;
+	var lastUpdate = 0;
+	var w = window.innerWidth;	
+	var h =  window.innerHeigh;
+    var Scene = new THREE.Scene();
+    Scene.background = new THREE.Color( 0xFFFFFF);
+    var Camera = new THREE.PerspectiveCamera( 75, window.innerWidth/window.innerHeight, 0.1, 10000 );
+    Camera.position.set(0, -50, 50);
+    Camera.lookAt(new THREE.Vector3(0,0,0));
+
+    Controls = new THREE.OrbitControls( Camera );
+
+	Controls.rotateSpeed = 1.0;
+	Controls.zoomSpeed = 1.2;
+	Controls.panSpeed = 0.8;
+
+	Controls.keys = [ 65, 83, 68 ];
+
+  	noise.seed(Math.random());
+
+    var Renderer = new THREE.WebGLRenderer();
+    Renderer.setSize( window.innerWidth, window.innerHeight );
+    document.body.appendChild( Renderer.domElement );
+	var container = document.getElementById( 'container' );
+	container.appendChild( Renderer.domElement );
+	var Stats = new Stats();
+
+    
+ 	var loader = new THREE.TextureLoader();
+
+	var texture = new THREE.TextureLoader().load( 'textures/bark.png' );
+	var texture_normal = new THREE.TextureLoader().load( 'textures/bark_normal.png' );
+
+	texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+	texture_normal.wrapS = texture_normal.wrapT =THREE.RepeatWrapping;
+	texture.repeat.set( 1, 25.0 );
+	texture_normal.repeat.set( 1, 25.0 );
+
+	var tree_material = new THREE.MeshPhongMaterial({
+                    shininess : 5,
+                    map : texture,
+                    normalMap: texture_normal
+                });
+
+	
+	for (var i=0; i<10; i++) {
+		var tree = new THREE.Tree({
+		    generations : 5,
+		    length : 4.0,
+		    uvLength : 20.0,
+		    radius : 0.2,
+		    radiusSegments : 8
+		});
+		trees_mesh.push(new THREE.Mesh(THREE.TreeGeometry.build(tree), tree_material));
+        //trees_mesh[i].castShadow =  trees_mesh[i].receiveShadow = true;
+        /*
+
+	            var tree = new THREE.Tree({
+	                generations : 4,
+	                length : 4.0,
+	                uvLength : 16.0,
+	                radius : 0.2,
+	                radiusSegments : 8
+	            });
+	            var geometry = THREE.TreeGeometry.build(tree);
+
+	            var treeMat = new THREE.TreeMaterial();
+	            treeMat.uniforms.uGrow.value = 0.0;
+	            treeMat.uniforms.map.value = app.treeMapTexture;
+	            treeMat.uniforms.offsetRepeat.value = new THREE.Vector4(app.treeMapTexture.offset.x, app.treeMapTexture.offset.y, app.treeMapTexture.repeat.x, app.treeMapTexture.repeat.y);
+	            treeMat.uniforms.normalMap.value = app.treeNormalMap;
+
+	            var depthMat = new THREE.ShaderMaterial({
+	                uniforms : { uGrow : { type : "f", value : 0.0 }, },
+	                vertexShader : __webpack_require__(20),
+	                fragmentShader : __webpack_require__(21)
+	            });
+
+	            var mesh = new THREE.Mesh(geometry, treeMat);
+        */
+	}
+
+
+	//var tree_mesh = new THREE.Mesh(THREE.TreeGeometry.build(tree), tree_material);
+
+	//Scene.add(tree_mesh);
+    //tree_mesh.position.set(0, 300, 0);
+	var plane_geometry = new THREE.PlaneBufferGeometry( 256, 256, 30, 30 );
+	var plane_material = new THREE.MeshBasicMaterial( {color: 0xffff00, side: THREE.DoubleSide } );
+	var plane = new THREE.Mesh( plane_geometry, plane_material );
+	//plane.rotateX(Math.PI/2);
+	plane.position.z -= 30;
+	//Scene.add( plane );
+	var array = plane.geometry.attributes.position.array;	
+
+	var faces_geometry = new THREE.Geometry();
+	var faces_material = new THREE.MeshBasicMaterial( { vertexColors: THREE.FaceColors, side: THREE.DoubleSide } );
+
+	for (var i=0; i<n; i++) {
+     	for (var j=0; j<m; j++) {
+			var noiseValue = noise.perlin3(i * 0.1, j * 0.1, perlinCycle);
+			noiseValue = Math.floor(scaleNoise(noiseValue) * waves);
+			var index = (i*n+j)*3+2;
+			plane.geometry.attributes.position.array[index] = noiseValue;
+	    }
+	}
+
+	var points = new THREE.Points( plane.geometry,  new THREE.PointsMaterial( { color: 0xDC143C } ) )
+
+	//points.rotateX(Math.PI/2);
+	//points.position.y 	+= 50;
+	vertex_array = points.geometry.attributes.position.array;
+
+	//Scene.add( points );
+	var h1, h2, s1 = 1, s2 = 1, l1 = 0.5, l2 = 0.5, hue1, hue2, max_z = 0, min_z = 1000, step=300, k = Math.floor(Math.random()*80);
+	var index = 3*(n-1), trees_count = 0; 
+
+	for (var j=0; j<(n-2); j++){
+		for (var i=0; i<(n-2)*3; i+=3){
+
+				var color1 = new THREE.Color();	
+				var color2 = new THREE.Color();
+				var a = new THREE.Vector3( vertex_array[i+j*index], vertex_array[i+1+j*index], vertex_array[i+2+j*index] );
+				var b = new THREE.Vector3( vertex_array[i+3+j*index], vertex_array[i+4+j*index], vertex_array[i+5+j*index]);
+				var c = new THREE.Vector3( vertex_array[i+(j+1)*index], vertex_array[i+1+(j+1)*index], vertex_array[i+2+(j+1)*index] );			
+				var d = new THREE.Vector3( vertex_array[i+3+(j+1)*index], vertex_array[i+4+(j+1)*index], vertex_array[i+5+(j+1)*index] );
+				hue1 = 0.04 +(a.z+b.z+c.z)/step;
+				hue2 = 0.04	+(d.z+b.z+c.z)/step;
+						
+				var middle1 = new THREE.Vector3( (a.x+b.x+c.x)/3, (a.y+b.y+c.y)/3, (a.z+b.z+c.z)/3 );
+				var middle2 = new THREE.Vector3( (d.x+b.x+c.x)/3, (d.y+b.y+c.y)/3, (d.z+b.z+c.z)/3 );
+				middle_faces.push(middle1);
+				middle_faces.push(middle2);
+				/*if(max_z < hue1)
+					max_z = hue1;
+				if(max_z < hue2)
+					max_z = hue2;
+				if(min_z > hue1)
+					min_z = hue1;
+				if(min_z > hue2)
+					min_z = hue2;*/
+
+				color1.setHSL( hue1, s1, l1 );
+				color2.setHSL( hue2, s2, l2 );
+
+				var face1 = new THREE.Face3(
+					faces_geometry.vertices.push( a ) -1 ,
+					faces_geometry.vertices.push( b ) -1 ,
+					faces_geometry.vertices.push( c ) -1 ,
+					null,
+					color1
+				);
+
+				var face2 = new THREE.Face3(
+					faces_geometry.vertices.push( b ) -1 ,
+					faces_geometry.vertices.push( c ) -1 ,
+					faces_geometry.vertices.push( d ) -1 ,
+					null,
+					color2
+				);
+
+				faces_geometry.faces.push( face1 );
+				faces_geometry.faces.push( face2 );
+
+				//var normal = face1.normal;
+
+				}
+			}
+		
+
+	//console.log(max_z);
+	//console.log(min_z);
+	faces_geometry.computeFaceNormals();
+	faces_geometry.computeVertexNormals();
+	Scene.add( new THREE.Mesh( faces_geometry, faces_material ) );
+
+	for (var i=0; i<faces_geometry.faces.length; i++){
+		if ( i % k == 0){			
+			k = Math.floor(Math.random()*60+20);
+			var little_tree = trees_mesh[trees_count].clone ();
+			Scene.add(little_tree);
+			little_tree.position.x = middle_faces[i].x;
+			little_tree.position.y = middle_faces[i].y;
+			little_tree.position.z = middle_faces[i].z;
+			little_tree.rotation.x = Math.PI/2;	
+			trees_count++;
+			if (trees_count == trees_mesh.length)
+				trees_count = 0;
+	   	}	
+	   	//console.log(k)
+	}
+
+	//var number = 1000;
+	/*tree_mesh.rotation.x = faces_geometry.faces[number].normal.x ;
+	tree_mesh.rotation.y = faces_geometry.faces[number].normal.y;
+	tree_mesh.rotation.z = faces_geometry.faces[number].normal.z;*/
+
+	window.addEventListener( 'resize', onWindowResize, false );
+	function onWindowResize() {
+		Camera.aspect = window.innerWidth / window.innerHeight;
+		Camera.updateProjectionMatrix();
+		Renderer.setSize( window.innerWidth, window.innerHeight );
+	}
+    var animate = function () { 	
+		
+		Controls.update();
+		Stats.update();
+        requestAnimationFrame( animate );      
+        Renderer.render(Scene, Camera);
+    };
+
+    animate();
+</script>
+</body>

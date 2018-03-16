@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>SkyFox</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				color: #ffffff;
+				font-family:Monospace;
+				font-size:13px;
+				text-align:center;
+				font-weight: bold;
+				background-color: #000000;
+				margin: 0px;
+				overflow: hidden;
+			}
+			#info {
+				color: #fff;
+				position: absolute;
+				top: 0px; width: 100%;
+				padding: 5px;
+				z-index:100;
+			}
+			a { color: red }
+		</style>
+	</head>
+
+	<body>
+		<div id="info"></div>
+		<div id="Container"></div>
+
+		<script src="src/three.js"></script>
+
+		<script src="src/ColladaLoader.js"></script>
+		<script src="src/SkeletonHelper.js"></script>
+		<script src="src/Tree.js"></script>
+		<script src="src/TreeGeometry.js"></script>
+		<script src="src/TreeHelper.js"></script>
+		<script src="src/OrbitControls.js"></script>
+		<script src="src/TrackballControls.js"></script>
+
+		<script src="src/ExplodeModifier.js"></script>
+		<script src="src/TessellateModifier.js"></script>
+		<script src="src/noise.js"></script>
+		<script src="src/perlin.js"></script>
+
+		<script src="src/Detector.js"></script>
+		<script src="src/stats.min.js"></script>
+
+		<script type="x-shader/x-vertex" id="vertexshader">
+			uniform float amplitude;
+			attribute vec3 customColor;
+			attribute vec3 displacement;
+			varying vec3 vNormal;
+			varying vec3 vColor;
+			void main() {
+				vNormal = normal;
+				vColor = customColor;
+				vec3 newPosition = position + normal * amplitude * displacement;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4( newPosition, 1.0 );
+			}
+		</script>
+
+		<script type="x-shader/x-fragment" id="fragmentshader">
+			varying vec3 vNormal;
+			varying vec3 vColor;
+			void main() {
+				const float ambient = 0.4;
+				vec3 light = vec3( 1.0 );
+				light = normalize( light );
+				float directional = max( dot( vNormal, light ), 0.0 );
+				gl_FragColor = vec4( ( directional + ambient ) * vColor, 1.0 );
+			}
+		</script>
+
+
+		<script>
+		if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+		var Container, Stats, Clock, Controls;
+		var Renderer, Scene, Camera, Stats, Mixer;
+		var mesh, uniforms, Fox;
+		var WIDTH = window.innerWidth,
+			HEIGHT = window.innerHeight,
+			FIELD_SIZE = 256;
+		var loader = new THREE.FontLoader();
+		loader.load( 'fonts/Allura_Regular.json', function ( font ) {
+			init( font );
+			animate();
+		} );
+		function init( font ) {
+			Camera = new THREE.PerspectiveCamera( 40, WIDTH / HEIGHT, 1, 10000 );
+		    Camera.position.set(0, -100, 40);
+		    Camera.lookAt(new THREE.Vector3(0,0,15));
+			Controls = new THREE.TrackballControls( Camera );
+			Scene = new THREE.Scene();
+			Scene.background = new THREE.Color( 0x007FFF );
+			Clock = new THREE.Clock();
+
+			///Загрузка модели Лисы\\\
+			var colloda_loader = new THREE.ColladaLoader();
+			colloda_loader.load( 'models/fox.dae', function ( collada ) {
+				var animations = collada.animations;
+				var avatar = collada.scene;
+
+				Mixer = new THREE.AnimationMixer( avatar );
+				var action = Mixer.clipAction( animations[ 0 ] ).play();
+				avatar.position.set(0, 0, 15);
+				avatar.rotateX(Math.PI/2)
+				Scene.add( avatar );
+
+			} );
+			var gridHelper = new THREE.GridHelper( 10, 20 );
+			//Scene.add( gridHelper );
+			
+			///Создание текста из треугольников\\\
+			var font_geometry = new THREE.TextGeometry( "SkyFox", {
+				font: font,
+				size: 10, //*
+				height: 1, //*
+				curveSegments: 6, //*
+				bevelThickness: 0.4, //*
+				bevelSize: 0.2, //*
+				bevelEnabled: true
+			});
+			font_geometry.center();
+			var tessellateModifier = new THREE.TessellateModifier( 8 );
+			for ( var i = 0; i < 6; i ++ ) {
+				tessellateModifier.modify( font_geometry );
+			}
+			var explodeModifier = new THREE.ExplodeModifier();
+			explodeModifier.modify( font_geometry );
+			var numFaces = font_geometry.faces.length;
+			//
+			text_geometry = new THREE.BufferGeometry().fromGeometry( font_geometry );
+			var colors = new Float32Array( numFaces * 3 * 3 );
+			var displacement = new Float32Array( numFaces * 3 * 3 );
+			var color = new THREE.Color();
+			for ( var f = 0; f < numFaces; f ++ ) {
+				var index = 9 * f;
+				var h = 0.125 * Math.random() ;
+				var s = 1;
+				var rand = Math.random(), l; 
+				if (rand > 0.77) 
+					l = 0.5 + 0.5 * (f%2);
+				else 
+					l = 0.5;
+				color.setHSL( h, s, l );
+				var d = 10 * ( 0.5 - Math.random() );
+				for ( var i = 0; i < 3; i ++ ) {
+					colors[ index + ( 3 * i )     ] = color.r;
+					colors[ index + ( 3 * i ) + 1 ] = color.g;
+					colors[ index + ( 3 * i ) + 2 ] = color.b;
+					displacement[ index + ( 3 * i )     ] = d;
+					displacement[ index + ( 3 * i ) + 1 ] = d;
+					displacement[ index + ( 3 * i ) + 2 ] = d;
+				}
+			}
+			text_geometry.addAttribute( 'customColor', new THREE.BufferAttribute( colors, 3 ) );
+			text_geometry.addAttribute( 'displacement', new THREE.BufferAttribute( displacement, 3 ) );
+			//
+			uniforms = {
+				amplitude: { value: 0.0 }
+			};
+			var shaderMaterial = new THREE.ShaderMaterial( {
+				uniforms:       uniforms,
+				vertexShader:   document.getElementById( 'vertexshader' ).textContent,
+				fragmentShader: document.getElementById( 'fragmentshader' ).textContent
+			});
+			//
+			text_mesh = new THREE.Mesh( text_geometry, shaderMaterial );
+			text_mesh.position.set(0, 0, 25);
+			text_mesh.rotateX(Math.PI/2)
+			Scene.add( text_mesh );
+
+			///Создание грунта\\\	    
+		    var middle_faces = [], trees_mesh =[], n = 32, m = 32, k = 0, waves = 30;
+	
+		 	var loader = new THREE.TextureLoader();
+
+			var texture = new THREE.TextureLoader().load( 'textures/bark.png' );
+			var texture_normal = new THREE.TextureLoader().load( 'textures/bark_normal.png' );
+
+			texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+			texture_normal.wrapS = texture_normal.wrapT =THREE.RepeatWrapping;
+			texture.repeat.set( 1, 25.0 );
+			texture_normal.repeat.set( 1, 25.0 );
+
+			var tree_material  = new THREE.MeshBasicMaterial( {map: texture, side: THREE.DoubleSide } );
+			
+			for (var i=0; i<10; i++) {
+				var tree = new THREE.Tree({
+				    generations : 5,
+				    length : 4.0,
+				    uvLength : 20.0,
+				    radius : 0.2,
+				    radiusSegments : 8
+				});
+				trees_mesh.push(new THREE.Mesh(THREE.TreeGeometry.build(tree), tree_material));
+
+		        trees_mesh[i].castShadow =  trees_mesh[i].receiveShadow = true;
+			}
+			var plane_geometry = new THREE.PlaneBufferGeometry( FIELD_SIZE, FIELD_SIZE, 30, 30 );
+			var plane_material = new THREE.MeshBasicMaterial( {map: texture, side: THREE.DoubleSide } );
+			var plane = new THREE.Mesh( plane_geometry, plane_material );
+			//plane.rotateX(Math.PI/2);
+			//plane.position.z -= 30;
+			//Scene.add( plane );
+			var vertex_array = plane.geometry.attributes.position.array;	
+
+			var faces_geometry = new THREE.Geometry();
+			var faces_material = new THREE.MeshBasicMaterial( { vertexColors: THREE.FaceColors, side: THREE.DoubleSide } );
+
+			for (var i=0; i<n; i++) {
+		     	for (var j=0; j<m; j++) {
+					var noiseValue = noise.perlin3(i * 0.1, j * 0.1, perlinCycle);
+					noiseValue = Math.floor(scaleNoise(noiseValue) * waves);
+					var index = (i*n+j)*3+2;
+					plane.geometry.attributes.position.array[index] = noiseValue;
+			    }
+			}
+
+			//var points = new THREE.Points( plane.geometry,  new THREE.PointsMaterial( { color: 0xDC143C } ) )
+
+			//points.rotateX(Math.PI/2);
+			//points.position.y 	+= 50;
+			//vertex_array = points.geometry.attributes.position.array;
+
+			//Scene.add( points );
+			var h1, h2, s1 = 1, s2 = 1, l1 = 0.5, l2 = 0.5, hue1, hue2, max_z = 0, min_z = 1000, step=300, k = Math.floor(Math.random()*80);
+			var index = 3*(n-1), trees_count = 0; 
+
+			for (var j=0; j<(n-2); j++){
+				for (var i=0; i<(n-2)*3; i+=3){
+
+						var color1 = new THREE.Color();	
+						var color2 = new THREE.Color();
+						var a = new THREE.Vector3( vertex_array[i+j*index], vertex_array[i+1+j*index], vertex_array[i+2+j*index] );
+						var b = new THREE.Vector3( vertex_array[i+3+j*index], vertex_array[i+4+j*index], vertex_array[i+5+j*index]);
+						var c = new THREE.Vector3( vertex_array[i+(j+1)*index], vertex_array[i+1+(j+1)*index], vertex_array[i+2+(j+1)*index] );			
+						var d = new THREE.Vector3( vertex_array[i+3+(j+1)*index], vertex_array[i+4+(j+1)*index], vertex_array[i+5+(j+1)*index] );
+						hue1 = 0.04 +(a.z+b.z+c.z)/step;
+						hue2 = 0.04	+(d.z+b.z+c.z)/step;
+								
+						var middle1 = new THREE.Vector3( (a.x+b.x+c.x)/3, (a.y+b.y+c.y)/3, (a.z+b.z+c.z)/3 );
+						var middle2 = new THREE.Vector3( (d.x+b.x+c.x)/3, (d.y+b.y+c.y)/3, (d.z+b.z+c.z)/3 );
+						middle_faces.push(middle1);
+						middle_faces.push(middle2);
+						/*if(max_z < hue1)
+							max_z = hue1;
+						if(max_z < hue2)
+							max_z = hue2;
+						if(min_z > hue1)
+							min_z = hue1;
+						if(min_z > hue2)
+							min_z = hue2;*/
+
+						color1.setHSL( hue1, s1, l1 );
+						color2.setHSL( hue2, s2, l2 );
+
+						var face1 = new THREE.Face3(
+							faces_geometry.vertices.push( a ) -1 ,
+							faces_geometry.vertices.push( b ) -1 ,
+							faces_geometry.vertices.push( c ) -1 ,
+							null,
+							color1
+						);
+
+						var face2 = new THREE.Face3(
+							faces_geometry.vertices.push( b ) -1 ,
+							faces_geometry.vertices.push( c ) -1 ,
+							faces_geometry.vertices.push( d ) -1 ,
+							null,
+							color2
+						);
+
+						faces_geometry.faces.push( face1 );
+						faces_geometry.faces.push( face2 );
+						}
+					}
+				
+			faces_geometry.computeFaceNormals();
+			faces_geometry.computeVertexNormals();
+			Scene.add( new THREE.Mesh( faces_geometry, faces_material ) );
+
+			for (var i=0; i<faces_geometry.faces.length; i++){
+				if ( i % k == 0){			
+					k = Math.floor(Math.random()*20+40);
+					var little_tree = trees_mesh[trees_count].clone ();
+					//Scene.add(little_tree);
+					little_tree.position.x = middle_faces[i].x;
+					little_tree.position.y = middle_faces[i].y;
+					little_tree.position.z = middle_faces[i].z;
+					little_tree.rotation.x = Math.PI/2;	
+					//little_tree.rotation.x = faces_geometry.faces[i].normal.x;
+					//little_tree.rotation.y = faces_geometry.faces[i].normal.y;
+					//little_tree.rotation.z = faces_geometry.faces[i].normal.z;
+					trees_count++;
+					if (trees_count == trees_mesh.length)
+						trees_count = 0;
+			   	}	
+			}
+
+
+/*
+			var grass_geometry = new THREE.PlaneBufferGeometry( 36, 36 );
+
+			var grass_texture = new THREE.CanvasTexture( generateTexture() );
+
+			for ( var i = 0; i < 15; i ++ ) {
+
+				var grass_material = new THREE.MeshBasicMaterial( {
+					color: new THREE.Color().setHSL( 0.3, 0.75, ( i / 15 ) * 0.4 + 0.1 ),
+					map: grass_texture,
+					depthTest: false,
+					depthWrite: false,
+					transparent: true
+				} );
+
+				var grass_mesh = new THREE.Mesh( grass_geometry, grass_material );
+
+				grass_mesh.position.y = i * 0.25;
+				grass_mesh.rotation.x = - Math.PI / 2;
+
+				Scene.add( grass_mesh );
+
+			}
+
+			Scene.children.reverse();*/
+
+			//var geometry1 = Scene.children[2].children;
+
+			Renderer = new THREE.WebGLRenderer( { antialias: true } );
+			Renderer.setPixelRatio( window.devicePixelRatio );
+			Renderer.setSize( WIDTH, HEIGHT );
+			var Container = document.getElementById( 'Container' );
+			Container.appendChild( Renderer.domElement );
+			Stats = new Stats();
+			Container.appendChild( Stats.dom );
+			//
+			window.addEventListener( 'resize', onWindowResize, false );
+		}
+		function generateTexture() {
+
+			var canvas = document.createElement( 'canvas' );
+			canvas.width = 256;
+			canvas.height = 256;
+
+			var context = canvas.getContext( '2d' );
+
+			for ( var i = 0; i < 6000; i ++ ) {
+
+				context.fillStyle = 'hsl(0,0%,' + ( Math.random() * 50 + 50 ) + '%)';
+				context.beginPath();
+				context.arc( Math.random() * canvas.width, Math.random() * canvas.height, Math.random() + 0.05, 0, Math.PI * 2, true );
+				context.fill();
+
+			}
+
+			context.globalAlpha = 0.075;
+			context.globalCompositeOperation = 'lighter';
+
+			return canvas;
+
+		}
+		function onWindowResize() {
+			Camera.aspect = window.innerWidth / window.innerHeight;
+			Camera.updateProjectionMatrix();
+			Renderer.setSize( window.innerWidth, window.innerHeight );
+		}
+		function animate() {
+			requestAnimationFrame( animate );
+			render();
+			Stats.update();
+		}
+		function render() {
+			var time = Date.now() * 0.001;
+			uniforms.amplitude.value = 1 + Math.sin( time  );
+			var delta = Clock.getDelta();
+			/*if ( Mixer !== undefined ) {
+				Mixer.update( delta );
+			}*/
+
+			/*for ( var i = 0, l = Scene.children.length-2; i < l; i ++ ) {
+
+				var mesh = Scene.children[ i ];
+				mesh.position.x = Math.sin( time * 4 ) * i * i * 0.005;
+				mesh.position.z = Math.cos( time * 6 ) * i * i * 0.005;
+
+			}*/
+			Controls.update();
+			Renderer.render( Scene, Camera );
+		}
+	</script>
+
+</body>
+
+</html>
